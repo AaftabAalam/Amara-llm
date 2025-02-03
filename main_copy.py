@@ -749,6 +749,29 @@ async def dialogflow_webhook_analyze_triggers(request: Request):
             }
         }
 
+def extract_important_insights(text):
+    prompt = f"""
+    You are an advanced AI specialized in text analysis. Analyze the following text and extract three key elements:
+    
+    1. **Important Points**: Identify the 5 most crucial facts, insights, or takeaways that are central to understanding the content.
+    2. **Main Topics**: Identify the 3 overarching themes or subjects discussed in the text.
+    3. **Crucial Statements**: Extract 3 sentences that serve as the foundation on which the rest of the content depends.
+
+    Text:
+    {text}
+    """
+    client = Groq(api_key="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")
+    completion = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
+        messages=[{"role": "system", "content": "You are a helpful assistant that analyzes incoming data."},
+                  {"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_completion_tokens=1024,
+        top_p=1,
+        stream=False,
+        stop=None,
+    )
+    return completion.choices[0].message.content.strip()
 
 @app.post("/store-content/")
 async def store_content(
@@ -827,6 +850,7 @@ async def store_content(
             os.remove(pdf_path)
 
         combined_summary = "\n\n".join(summaries)
+        insights = extract_important_insights(combined_summary)
 
         text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
         chunks = text_splitter.split_text(combined_summary)
@@ -838,6 +862,7 @@ async def store_content(
             content={
                 "document_id": doc_id,
                 "summary": combined_summary,
+                "Insights": insights,
                 "sources": {
                     "video": video.filename if video else None,
                     "pdf": pdf.filename if pdf else None
