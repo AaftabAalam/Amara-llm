@@ -925,50 +925,61 @@ async def generate_qa(
     video_id: str = Body(...), 
     num_questions: int = Body(5)
 ):
-    """
-    Generate Q&A from stored video summary and format the response as a webhook output.
-    
-    Args:
-        video_id (str): ID of the video (used for retrieval from ChromaDB)
-        num_questions (int): Number of questions to generate
-    
-    Returns:
-        JSONResponse: Webhook-compatible output with nested fields
-    """
     try:
-        # Load the vector store
         vector_store = Chroma(persist_directory=PERSIST_DIRECTORY, embedding_function=embeddings)
 
-        # Retrieve stored summary using video_id as a filter
-        docs = vector_store.similarity_search(query=video_id, k=1)  # Using video_id for retrieval
+        docs = vector_store.similarity_search(query=video_id, k=1)
         print(video_id)
         if not docs:
             raise HTTPException(status_code=404, detail=f"Summary not found for video_id: {video_id}")
         
         summary = docs[0].page_content
 
-        # Generate Q&A
         qa_text = video_processor.generate_qa_with_groq(summary, num_questions)
-
-        # Parse the generated Q&A into a structured format
-        predefined_analysis_results = {}
+        qa_pairs = []
         sections = qa_text.strip().split("\n\n")
         for section in sections:
             if ": " in section:
                 heading, questions_text = section.split(": ", 1)
                 questions = [q.strip() for q in questions_text.split("\n") if q.strip()]
-                predefined_analysis_results[heading.strip()] = questions
+                
+                for question in questions:
+                    answer = question
+                    qa_pairs.append({
+                        "question": question,
+                        "answer": answer
+                    })
 
-        # Format the output as a webhook-compatible response
+        print("QA Pairs: ", qa_pairs)
+
         response = {
             "sessionInfo": {
                 "parameters": {
-                    "video_id": video_id,  # Include video_id in response
-                    "response_message": f"Here are some Questions and Answers:\n\n{qa_text.strip()}",
-                    "Questions_Answers": predefined_analysis_results
+                    "video_id": video_id,
+                    "response_message": qa_pairs,
+                    "Questions_Answers": qa_pairs
                 }
             }
         }
+        # Parse the generated Q&A into a structured format
+        # predefined_analysis_results = {}
+        # sections = qa_text.strip().split("\n\n")
+        # for section in sections:
+        #     if ": " in section:
+        #         heading, questions_text = section.split(": ", 1)
+        #         questions = [q.strip() for q in questions_text.split("\n") if q.strip()]
+        #         predefined_analysis_results[heading.strip()] = questions
+
+        # # Format the output as a webhook-compatible response
+        # response = {
+        #     "sessionInfo": {
+        #         "parameters": {
+        #             "video_id": video_id,  # Include video_id in response
+        #             "response_message": f"Here are some Questions and Answers:\n\n{qa_text.strip()}",
+        #             "Questions_Answers": predefined_analysis_results
+        #         }
+        #     }
+        # }
 
         return JSONResponse(content=response, status_code=200)
 
