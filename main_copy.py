@@ -859,8 +859,8 @@ async def store_content(
                     "pdf": pdf.filename if pdf else None
                 },
                 "tags":{
-                    "pdf tags": pdf_tags if pdf else [],
-                    "video tags": video_tags if video else [],
+                    "pdf_tags": pdf_tags if pdf else [],
+                    "video_tags": video_tags if video else [],
                 }
             },
             status_code=200
