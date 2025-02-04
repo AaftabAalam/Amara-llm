@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request,UploadFile, File, Form, Body
+from fastapi import FastAPI, HTTPException, Request,UploadFile, File, Form, Body, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional,Union
@@ -25,6 +25,7 @@ from groq import Groq
 import requests
 import json
 import statistics
+from tenacity import retry, stop_after_attempt, wait_fixed
 
 app = FastAPI()
 # Enable CORS
@@ -778,18 +779,7 @@ async def store_content(
     video: UploadFile = File(None),
     pdf: UploadFile = File(None)
 ):
-    """
-    Upload and store content (video, PDF, or both). Transcribe, summarize, and store in ChromaDB.
-    
-    Args:
-        video (UploadFile): Video file uploaded by the user (optional).
-        pdf (UploadFile): PDF file uploaded by the user (optional).
-    
-    Returns:
-        JSONResponse: Unique document ID for the stored content.
-    """
     try:
-        # Check if at least one file is uploaded
         if not video and not pdf:
             raise HTTPException(status_code=400, detail="At least one of video or PDF must be uploaded.")
         
@@ -875,93 +865,137 @@ async def store_content(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/generate_qa_webhook/")
-async def generate_qa(video_id: str = Body(...), num_questions: int = Body(5)):
-    """
-    Generate Q&A from stored video summary and format the response as a webhook output.
-    
-    Args:
-        video_id (str): ID of the video (used for retrieval from ChromaDB)
-        num_questions (int): Number of questions to generate
-    
-    Returns:
-        JSONResponse: Webhook-compatible output with nested fields
-    """
-    try:
-        vector_store = Chroma(persist_directory=PERSIST_DIRECTORY, embedding_function=embeddings)
+# @app.post("/generate_qa_webhook/")
+# async def generate_qa(video_id: str = Body(...), num_questions: int = Body(5)):
+#     try:
+#         vector_store = Chroma(persist_directory=PERSIST_DIRECTORY, embedding_function=embeddings)
 
-        docs = vector_store.similarity_search(query="summary", k=1)
-        if not docs:
-            raise HTTPException(status_code=404, detail="Summary not found for the given video_id.")
-        summary = docs[0].page_content
+#         docs = vector_store.similarity_search(query="summary", k=1)
+#         if not docs:
+#             raise HTTPException(status_code=404, detail="Summary not found for the given video_id.")
+#         summary = docs[0].page_content
 
-        qa_text = video_processor.generate_qa_with_groq(summary, num_questions)
+#         qa_text = video_processor.generate_qa_with_groq(summary, num_questions)
 
-        predefined_analysis_results = {}
-        sections = qa_text.strip().split("\n\n")
-        for section in sections:
-            if ": " in section:
-                heading, questions_text = section.split(": ", 1)
-                questions = [q.strip() for q in questions_text.split("\n") if q.strip()]
-                predefined_analysis_results[heading.strip()] = questions
+#         predefined_analysis_results = {}
+#         sections = qa_text.strip().split("\n\n")
+#         for section in sections:
+#             if ": " in section:
+#                 heading, questions_text = section.split(": ", 1)
+#                 questions = [q.strip() for q in questions_text.split("\n") if q.strip()]
+#                 predefined_analysis_results[heading.strip()] = questions
  
-        response = {
-            "sessionInfo": {
-                "parameters": {
-                    "response_message": f"Here are some Questions and Answers:\n\n{qa_text.strip()}",
-                    "Questions_Answers": predefined_analysis_results
-                }
-            }
-        }
+#         response = {
+#             "sessionInfo": {
+#                 "parameters": {
+#                     "response_message": f"Here are some Questions and Answers:\n\n{qa_text.strip()}",
+#                     "Questions_Answers": predefined_analysis_results
+#                 }
+#             }
+#         }
 
-        return JSONResponse(content=response, status_code=200)
+#         return JSONResponse(content=response, status_code=200)
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
+
+@retry(stop=stop_after_attempt(5), wait=wait_fixed(2))
+async def attempt_generate_qa(video_id: str, num_questions: int):
+    vector_store = Chroma(persist_directory=PERSIST_DIRECTORY, embedding_function=embeddings)
+    docs = vector_store.similarity_search(query=video_id, k=1)
+    if not docs:
+        raise HTTPException(status_code=404, detail=f"Summary not found for video id: {video_id}")
+    
+    summary = docs[0].page_content
+    qa_text = video_processor.generate_qa_with_groq(summary, num_questions)
+    qa_pairs = []
+
+    sections = qa_text.strip().split("\n\n")
+    for i in range(len(sections)):
+        section = sections[i].strip()
+
+        if section.startswith("**Q"):
+            question = section.replace("**Q", "", 1).strip()
+            question = re.sub(r"^\w+\s*\d*\*\*:\s*", "", question)
+            if i + 1 < len(sections) and sections[i + 1].startswith("**A"):
+                answer = sections[i + 1].replace("**A", "", 1).strip()
+                answer = re.sub(r"^\w+\*\*:\s*", "", answer)
+                qa_pairs.append({
+                    "question": question.strip(),
+                    "answer": answer.strip()
+                })
+    if not qa_pairs:
+        raise ValueError("No questions and answers generated.")
+
+    return qa_pairs
 
 @app.post("/generate-qa_webhook/")
-async def generate_qa(
-    video_id: str = Body(...), 
-    num_questions: int = Body(5)
-):
+async def generate_qa(video_id: str = Body(...), num_questions: int = Body(5)):
     try:
-        vector_store = Chroma(persist_directory=PERSIST_DIRECTORY, embedding_function=embeddings)
-
-        docs = vector_store.similarity_search(query=video_id, k=1)
-        print(video_id)
-        if not docs:
-            raise HTTPException(status_code=404, detail=f"Summary not found for video_id: {video_id}")
-        
-        summary = docs[0].page_content
-
-        qa_text = video_processor.generate_qa_with_groq(summary, num_questions)
-        qa_pairs = []
-        sections = qa_text.strip().split("\n\n")
-        for section in sections:
-            if ": " in section:
-                heading, questions_text = section.split(": ", 1)
-                questions = [q.strip() for q in questions_text.split("\n") if q.strip()]
-                
-                for question in questions:
-                    answer = question
-                    qa_pairs.append({
-                        "question": question,
-                        "answer": answer
-                    })
-
-        print("QA Pairs: ", qa_pairs)
+        try:
+            qa_pairs = await attempt_generate_qa(video_id, num_questions)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Maximum number of retry completed, can't do more retry: {str(e)}")
 
         response = {
             "sessionInfo": {
                 "parameters": {
                     "video_id": video_id,
-                    "response_message": qa_pairs,
                     "Questions_Answers": qa_pairs
                 }
             }
         }
-        # Parse the generated Q&A into a structured format
+        return JSONResponse(content=response, status_code=200)
+
+    except HTTPException as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    
+# @app.post("/generate-qa_webhook/")
+# async def generate_qa(
+#     video_id: str = Body(...), 
+#     num_questions: int = Body(5)
+# ):
+#     try:
+#         vector_store = Chroma(persist_directory=PERSIST_DIRECTORY, embedding_function=embeddings)
+
+#         docs = vector_store.similarity_search(query=video_id, k=1)
+#         if not docs:
+#             raise HTTPException(status_code=404, detail=f"Summary not found for video_id: {video_id}")
+        
+#         summary = docs[0].page_content
+
+#         qa_text = video_processor.generate_qa_with_groq(summary, num_questions)
+#         qa_pairs = []
+
+#         sections = qa_text.strip().split("\n\n")
+
+#         for i in range(len(sections)):
+#             section = sections[i].strip()
+
+#             if section.startswith("**Q"):
+#                 question = section.replace("**Q", "", 1).strip()
+#                 question = re.sub(r"^\w+\s*\d*\*\*:\s*", "", question)
+#                 if i + 1 < len(sections) and sections[i + 1].startswith("**A"):
+#                     answer = sections[i + 1].replace("**A", "", 1).strip()
+#                     answer = re.sub(r"^\w+\*\*:\s*", "", answer)
+#                     qa_pairs.append({
+#                         "question": question.strip(),
+#                         "answer": answer.strip()
+#                     })
+#         response = {
+#             "sessionInfo": {
+#                 "parameters": {
+#                     "video_id": video_id,
+#                     "Questions_Answers": qa_pairs
+#                 }
+#             }
+#         }
+#         return JSONResponse(content=response, status_code=200)
+
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
         # predefined_analysis_results = {}
         # sections = qa_text.strip().split("\n\n")
         # for section in sections:
@@ -970,22 +1004,15 @@ async def generate_qa(
         #         questions = [q.strip() for q in questions_text.split("\n") if q.strip()]
         #         predefined_analysis_results[heading.strip()] = questions
 
-        # # Format the output as a webhook-compatible response
         # response = {
         #     "sessionInfo": {
         #         "parameters": {
-        #             "video_id": video_id,  # Include video_id in response
+        #             "video_id": video_id,
         #             "response_message": f"Here are some Questions and Answers:\n\n{qa_text.strip()}",
         #             "Questions_Answers": predefined_analysis_results
         #         }
         #     }
         # }
-
-        return JSONResponse(content=response, status_code=200)
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 import requests
 
