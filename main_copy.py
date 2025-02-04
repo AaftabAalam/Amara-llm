@@ -16,7 +16,7 @@ from PyPDF2 import PdfReader
 import shutil
 from datetime import datetime
 import uuid
-from video import VideoProcessor
+from video import VideoProcessor, extract_tags
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import pdfplumber
@@ -795,6 +795,7 @@ async def store_content(
             
             audio_path = video_processor.convert_video_to_audio(video_path)
             transcription = video_processor.transcribe_audio(audio_path)
+            video_tags = extract_tags(transcription)
             video_summary = video_processor.summarize_with_groq(transcription)
             summaries.append(video_summary)
             
@@ -805,11 +806,11 @@ async def store_content(
             pdf_path = os.path.join(temp_dir, pdf.filename)
             with open(pdf_path, "wb") as buffer:
                 shutil.copyfileobj(pdf.file, buffer)
-
             try:
                 from PyPDF2 import PdfReader
                 reader = PdfReader(pdf_path)
                 pdf_text = "\n".join([page.extract_text() for page in reader.pages])
+                pdf_tags = extract_tags(pdf_text)
 
                 text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=500)
                 chunks = text_splitter.split_text(pdf_text)
@@ -856,6 +857,10 @@ async def store_content(
                 "sources": {
                     "video": video.filename if video else None,
                     "pdf": pdf.filename if pdf else None
+                },
+                "tags":{
+                    "pdf tags": pdf_tags if pdf else [],
+                    "video tags": video_tags if video else [],
                 }
             },
             status_code=200
@@ -936,7 +941,7 @@ async def generate_qa(video_id: str = Body(...), num_questions: int = Body(5)):
         try:
             qa_pairs = await attempt_generate_qa(video_id, num_questions)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Maximum number of retry completed, can't do more retry: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Maximum number of retry completed, Please hit api again: {str(e)}")
 
         response = {
             "sessionInfo": {

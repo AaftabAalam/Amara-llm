@@ -1,4 +1,5 @@
 import os
+import json
 import shutil
 import whisper
 from groq import Groq
@@ -73,3 +74,35 @@ class VideoProcessor:
             return chat_completion.choices[0].message.content.strip()
         except Exception as e:
             raise RuntimeError(f"Q&A generation error: {e}")
+
+
+def extract_tags(data):
+    prompt = f"""
+    Your task is to analyze the given text data and extract the most relevant tags that accurately represent the key topics, themes, or concepts mentioned in the text.
+    Instructions:
+    1. Identify the core topics, entities, or themes present in the text.
+    2. Extract concise, meaningful tags that summarize the main points.
+    3. Ensure the tags are short (1-8 or 1-15 words each less or more), relevant, and specific to the content.
+    4. Exclude generic words (e.g., "the," "is," "very") and focus on substantive keywords.
+    5. Return only a JSON-formatted array of tags, nothing else.
+    
+    Example output: ["Tag1", "Tag2", "Tag3", "Tag4"]
+
+    This is the incoming data on which you have to perform the operations:
+    {data}
+"""
+    client = Groq(api_key="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")
+    chat_completion = client.chat.completions.create(
+        messages=[
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+        model="llama-3.3-70b-versatile",
+    )
+    response = chat_completion.choices[0].message.content
+    try:
+        return json.loads(response)
+    except json.JSONDecoderError:
+        return []
