@@ -916,10 +916,10 @@ async def attempt_generate_qa(video_id: str, num_questions: int):
         section = sections[i].strip()
 
         if section.startswith("**Q"):
-            question = section.replace("**Q", "", 1).strip()
+            question = section.replace("**", "", 1).strip()
             question = re.sub(r"^\w+\s*\d*\*\*:\s*", "", question)
             if i + 1 < len(sections) and sections[i + 1].startswith("**A"):
-                answer = sections[i + 1].replace("**A", "", 1).strip()
+                answer = sections[i + 1].replace("**", "", 1).strip()
                 answer = re.sub(r"^\w+\*\*:\s*", "", answer)
                 qa_pairs.append({
                     "question": question.strip(),
