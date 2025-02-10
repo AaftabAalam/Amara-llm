@@ -12,7 +12,7 @@ from moviepy.video.io.VideoFileClip import VideoFileClip
 PERSIST_DIRECTORY = "chroma_db"
 
 # Groq API key
-GROQ_API_KEY = "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"
+GROQ_API_KEY = "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"
 
 # Whisper model for transcription
 whisper_model = whisper.load_model("base")
@@ -91,7 +91,7 @@ def extract_tags(data):
     This is the incoming data on which you have to perform the operations:
     {data}
 """
-    client = Groq(api_key="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")
+    client = Groq(api_key="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")
     chat_completion = client.chat.completions.create(
         messages=[
             {
