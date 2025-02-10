@@ -8,6 +8,17 @@ from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 import uuid
 from moviepy.video.io.VideoFileClip import VideoFileClip
+import cv2
+import mediapipe as mp
+import numpy as np
+import time
+from PIL import Image
+import json
+from ultralytics import YOLO
+from pydantic import BaseModel
+from typing import Optional, Dict, Any
+import asyncio
+from datetime import datetime
 
 PERSIST_DIRECTORY = "chroma_db"
 
@@ -106,3 +117,97 @@ def extract_tags(data):
         return json.loads(response)
     except json.JSONDecoderError:
         return []
+
+class AttentionTracker:
+    def __init__(self):
+        self.mp_face_mesh = mp.solutions.face_mesh
+        self.face_mesh = self.mp_face_mesh.FaceMesh(
+            max_num_faces=1, min_detection_confidence=0.6, min_tracking_confidence=0.6
+        )
+        self.mp_face_detection = mp.solutions.face_detection
+        self.face_detector = self.mp_face_detection.FaceDetection(min_detection_confidence=0.5)
+        self.phone_detector = YOLO("yolov8n.pt")
+
+        self.attention_threshold = 0.81
+        self.attention_window = 5
+        self.attention_history = []
+        self.last_alert_time = 0
+        self.alert_cooldown = 10
+
+        self.LEFT_EYE = [362, 385, 387, 263, 373, 380]
+        self.RIGHT_EYE = [33, 160, 158, 133, 153, 144]
+        self.NOSE = 1
+
+    def calculate_eye_aspect_ratio(self, eye_landmarks):
+        v1 = np.linalg.norm(eye_landmarks[1] - eye_landmarks[5])
+        v2 = np.linalg.norm(eye_landmarks[2] - eye_landmarks[4])
+        h = np.linalg.norm(eye_landmarks[0] - eye_landmarks[3])
+        return (v1 + v2) / (2.0 * h)
+
+    def detect_phone(self, frame):
+        results = self.phone_detector(frame)
+        for r in results:
+            for box in r.boxes:
+                if int(box.cls[0]) == 67:
+                    return True, box.xyxy[0].tolist()
+        return False, None
+
+    def process_frame(self, frame):
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        results = self.face_mesh.process(frame_rgb)
+        phone_detected, phone_box = self.detect_phone(frame)
+        current_time = time.time()
+
+        attention_data = {
+            "timestamp": datetime.now().isoformat(),
+            "attention_score": None,
+            "phone_detected": phone_detected,
+            "phone_box": phone_box,
+            "eye_aspect_ratio": None,
+            "gaze_score": None,
+            "alert": False,
+            "alert_message": None
+        }
+
+        if results.multi_face_landmarks:
+            face_landmarks = results.multi_face_landmarks[0]
+            left_eye = np.array([[face_landmarks.landmark[i].x * frame.shape[1], 
+                                face_landmarks.landmark[i].y * frame.shape[0]] 
+                                for i in self.LEFT_EYE])
+            right_eye = np.array([[face_landmarks.landmark[i].x * frame.shape[1], 
+                                 face_landmarks.landmark[i].y * frame.shape[0]] 
+                                 for i in self.RIGHT_EYE])
+
+            left_ear = self.calculate_eye_aspect_ratio(left_eye)
+            right_ear = self.calculate_eye_aspect_ratio(right_eye)
+            ear = (left_ear + right_ear) / 2.0
+            ear = np.clip(ear / 0.35, 0, 1)
+
+            nose = face_landmarks.landmark[self.NOSE]
+            gaze_score = max(0, 1 - abs(nose.x - 0.5) * 2)
+
+            attention_score = (0.6 * ear) + (0.4 * gaze_score)
+            if phone_detected:
+                attention_score *= 0.5
+
+            self.attention_history.append((current_time, attention_score))
+            self.attention_history = [(t, s) for t, s in self.attention_history 
+                                    if current_time - t <= self.attention_window]
+            avg_attention = np.mean([s for _, s in self.attention_history])
+
+            alert = False
+            alert_message = None
+            if avg_attention < self.attention_threshold and current_time - self.last_alert_time > self.alert_cooldown:
+                alert = True
+                alert_message = "Distraction detected"
+                self.last_alert_time = current_time
+
+            attention_data.update({
+                "attention_score": float(avg_attention),
+                "eye_aspect_ratio": float(ear),
+                "gaze_score": float(gaze_score),
+                "alert": alert,
+                "alert_message": alert_message
+            })
+
+        return attention_data

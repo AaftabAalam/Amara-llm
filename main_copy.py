@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request,UploadFile, File, Form, Body, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request,UploadFile, File, Form, Body, BackgroundTasks, WebSocket
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import List, Optional,Union
@@ -16,7 +16,7 @@ from PyPDF2 import PdfReader
 import shutil
 from datetime import datetime
 import uuid
-from video import VideoProcessor, extract_tags
+from video import VideoProcessor, extract_tags, AttentionTracker
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import pdfplumber
@@ -26,6 +26,11 @@ import requests
 import json
 import statistics
 from tenacity import retry, stop_after_attempt, wait_fixed
+import base64
+import cv2
+from PIL import Image
+import io
+import numpy as np
 
 app = FastAPI()
 # Enable CORS
@@ -1205,6 +1210,37 @@ async def assess_summary(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class ImagePayload(BaseModel):
+    image: str  
+
+tracker = AttentionTracker()
+
+@app.post("/analyze/")
+async def analyze_attention(payload: ImagePayload):
+    try:
+        image_bytes = base64.b64decode(payload.image)
+        image = Image.open(io.BytesIO(image_bytes))
+        opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+        results = tracker.process_frame(opencv_image)
+        return {"status": "success", "data": results}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.websocket("/ws/track")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            image_bytes = base64.b64decode(data.split(',')[1] if ',' in data else data)
+            image = Image.open(io.BytesIO(image_bytes))
+            opencv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+            results = tracker.process_frame(opencv_image)
+            await websocket.send_json(results)
+    except Exception as e:
+        await websocket.send_json({"error": str(e)})
+    finally:
+        await websocket.close()
 
 @app.post("/webhook/persona")
 async def dialogflow_webhook_persona(request: Request):
