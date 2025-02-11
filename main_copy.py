@@ -1137,7 +1137,6 @@ async def assess_summary(
         similarity_scores = []
         correct_answers = 0
         incorrect_answers = 0
-        sentiments = []
         misconceptions = []
 
         conversation_text = ""
@@ -1154,10 +1153,10 @@ async def assess_summary(
                 correct_answers += 1
             else:
                 incorrect_answers += 1
-                misconceptions.append(f"Q: {question} | Incorrect Answer: {user_response}")
+                misconceptions.append(user_response)
 
-            # Append to conversation text for LLM analysis
-            conversation_text += f"Q: {question}\nA: {user_response}\n\n"
+            # Append to conversation text for sentiment analysis
+            conversation_text += f"{user_response}\n"
 
         # Compute confidence level
         avg_similarity = round(statistics.mean(similarity_scores), 2)
@@ -1168,21 +1167,15 @@ async def assess_summary(
         if len(similarity_scores) > 1 and similarity_scores[-1] > similarity_scores[0]:
             improvement_detected = True
 
-        # Use Groq for sentiment analysis
+        # Use Groq for sentiment analysis with a strict format
         sentiment_prompt = f"""
-        Analyze the sentiment of the following conversation. Rate it as 'Positive', 'Neutral', or 'Negative'. 
-        Conversation:
+        Analyze the sentiment of the following responses. Only return one word: 'Positive', 'Neutral', or 'Negative'.
+        Responses:
         {conversation_text}
         """
-        sentiment_summary = video_processor.generate_qa_with_groq(sentiment_prompt, 1).strip()
-
-        # Use Groq for misconception analysis
-        misconception_prompt = f"""
-        Identify incorrect responses from the following conversation and summarize the common mistakes.
-        Conversation:
-        {conversation_text}
-        """
-        misconception_analysis = video_processor.generate_qa_with_groq(misconception_prompt, 1).strip()
+        sentiment_summary = video_processor.analyze_sentiment_with_groq(sentiment_prompt).strip()
+        if sentiment_summary not in ["Positive", "Negative", "Neutral"]:
+            sentiment_summary = "Neutral"
 
         # Format the final summary
         response = {
@@ -1199,7 +1192,7 @@ async def assess_summary(
                     "emotional_analysis": {
                         "overall_sentiment": sentiment_summary
                     },
-                    "common_misconceptions": misconception_analysis if misconception_analysis else "None detected",
+                    "common_misconceptions": misconceptions if misconceptions else "None detected",
                     "recommendations": "Review misunderstood concepts" if incorrect_answers > 0 else "Great progress! Keep practicing."
                 }
             }
