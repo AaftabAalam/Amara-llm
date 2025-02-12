@@ -804,8 +804,8 @@ async def store_content(
             video_summary = video_processor.summarize_with_groq(transcription)
             summaries.append(video_summary)
             
-            os.remove(video_path)
-            os.remove(audio_path)
+            #os.remove(video_path)
+            #os.remove(audio_path)
 
         if pdf:
             pdf_path = os.path.join(temp_dir, pdf.filename)
@@ -844,6 +844,7 @@ async def store_content(
                 raise RuntimeError(f"PDF processing error: {e}")
 
             os.remove(pdf_path)
+            os.remove(video_path)
 
         combined_summary = "\n\n".join(summaries)
         insights = extract_important_insights(combined_summary)
@@ -913,7 +914,7 @@ async def store_content(
 @retry(stop=stop_after_attempt(5), wait=wait_fixed(2))
 async def attempt_generate_qa(video_id: str, num_questions: int):
     vector_store = Chroma(persist_directory=PERSIST_DIRECTORY, embedding_function=embeddings)
-    docs = vector_store.similarity_search(query=video_id, k=1)
+    docs = vector_store.similarity_search(query=summary, k=1)#video_id
     if not docs:
         raise HTTPException(status_code=404, detail=f"Summary not found for video id: {video_id}")
     
