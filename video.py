@@ -85,7 +85,28 @@ class VideoProcessor:
             return chat_completion.choices[0].message.content.strip()
         except Exception as e:
             raise RuntimeError(f"Q&A generation error: {e}")
-
+        
+    def analyze_sentiment_with_groq(self, text: str) -> str:
+        """
+        Analyzes the sentiment of the given text and returns 'Positive', 'Neutral', or 'Negative'.
+        """
+        try:
+            prompt = f"""
+            Analyze the sentiment of the following responses and return only one word: 'Positive', 'Neutral', or 'Negative'.
+            Responses:
+            {text}
+            """
+            chat_completion = self.groq_client.chat.completions.create(
+                messages=[
+                    {"role": "system", "content": "You are an AI that strictly returns sentiment analysis results."},
+                    {"role": "user", "content": prompt}
+                ],
+                model="llama3-8b-8192"
+            )
+            sentiment = chat_completion.choices[0].message.content.strip()
+            return sentiment if sentiment in ["Positive", "Neutral", "Negative"] else "Neutral"
+        except Exception as e:
+            return "Neutral"
 
 def extract_tags(data):
     prompt = f"""
