@@ -23,7 +23,7 @@ from datetime import datetime
 PERSIST_DIRECTORY = "chroma_db"
 
 # Groq API key
-GROQ_API_KEY = "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"
+GROQ_API_KEY = "your_key"
 
 # Whisper model for transcription
 whisper_model = whisper.load_model("base")
@@ -123,7 +123,7 @@ def extract_tags(data):
     This is the incoming data on which you have to perform the operations:
     {data}
 """
-    client = Groq(api_key="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")
+    client = Groq(api_key="your_key")
     chat_completion = client.chat.completions.create(
         messages=[
             {
