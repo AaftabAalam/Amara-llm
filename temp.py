@@ -45,7 +45,7 @@ except Exception as e:
     raise
 
 sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-GROQ_API_KEY = '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'
+GROQ_API_KEY = 'your_key'
 MODEL_NAME = "llama-3.3-70b-versatile"
 PERSIST_DIRECTORY = 'db'
 video_processor = VideoProcessor(GROQ_API_KEY)
