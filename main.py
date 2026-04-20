@@ -82,7 +82,7 @@ def extract_key_info(data):
         }}
         """
 
-        client = Groq(api_key="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")
+        client = Groq(api_key=your_api_key)
 
         chat_completion = client.chat.completions.create(
             messages=[
@@ -150,7 +150,7 @@ def compare_data(data1, data2):
         {data2}
         """
 
-        client = Groq(api_key="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")
+        client = Groq(api_key=your_api_key)
         chat_completion = client.chat.completions.create(
             messages=[
                 {
@@ -274,7 +274,7 @@ async def upload_resume(file: UploadFile = File(...)):
 #     raise
 
 sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-GROQ_API_KEY = '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'
+GROQ_API_KEY = your_api_key
 MODEL_NAME = "llama-3.3-70b-versatile"
 PERSIST_DIRECTORY = 'db'
 video_processor = VideoProcessor(GROQ_API_KEY)
@@ -766,7 +766,7 @@ def extract_important_insights(text):
     Text:
     {text}
     """
-    client = Groq(api_key="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")
+    client = Groq(api_key="your_api_key")
     completion = client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "system", "content": "You are a helpful assistant that analyzes incoming data."},
